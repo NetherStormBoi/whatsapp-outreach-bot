@@ -1,0 +1,12 @@
+# Node dependencies
+node_modules/
+
+# WhatsApp session tokens and cache (CRITICAL SECURITY)
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Excel file containing personal phone numbers
+contacts.xlsx
+
+# Environment variables (if you add them later)
+.env
