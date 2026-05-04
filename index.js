@@ -99,7 +99,7 @@ app.post('/upload', upload.single('excelFile'), async (req, res) => {
 
     // --- Start the Outreach Loop ---
     console.log(`Starting outreach for ${data.length} potential rows...`);
-    const link = "https://your-portfolio-link.com";
+    const link = "https://www.micron.com";
 
     for (let i = 0; i < data.length; i++) {
         const row = data[i];
