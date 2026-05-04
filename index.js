@@ -23,8 +23,13 @@ const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: { 
         headless: true,
-        // CRITICAL FIX: Cloud Linux servers require these flags to run headless Chrome
-        args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage', // Forces Chrome to use less memory
+            '--disable-gpu',           // Disables graphics processing
+            '--no-first-run'           // Skips Chrome setup processes
+        ] 
     }
 });
 
