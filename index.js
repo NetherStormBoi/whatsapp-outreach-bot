@@ -127,7 +127,7 @@ app.post('/upload', upload.single('excelFile'), async (req, res) => {
     console.log('🎉 Automation loop finished!');
 });
 
-// Start the Express server
-app.listen(port, () => {
+// Start the Express server and FORCE bind to 0.0.0.0
+app.listen(port, '0.0.0.0', () => {
     console.log(`🌐 Web Dashboard running on port ${port}`);
 });
