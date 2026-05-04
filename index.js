@@ -1,120 +1,133 @@
+const express = require('express');
+const multer = require('multer');
+const qrcode = require('qrcode');
 const xlsx = require('xlsx');
 const phoneUtil = require('google-libphonenumber').PhoneNumberUtil.getInstance();
 const PNF = require('google-libphonenumber').PhoneNumberFormat;
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
+
+const app = express();
+const port = process.env.PORT || 3000;
+
+// Configure Multer to hold the uploaded Excel file in memory (no saving to disk)
+const upload = multer({ storage: multer.memoryStorage() });
+
+// Global variables to hold the WhatsApp state
+let currentQR = '';
+let waStatus = 'Initializing...';
 
 // ==========================================
-// 1. DATA PIPELINE: Parse Excel & Fix Numbers
+// 1. WHATSAPP ENGINE SETUP
 // ==========================================
-function processExcel(filePath) {
-    const workbook = xlsx.readFile(filePath);
+const client = new Client({
+    authStrategy: new LocalAuth(),
+    puppeteer: { 
+        headless: true,
+        // CRITICAL FIX: Cloud Linux servers require these flags to run headless Chrome
+        args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+    }
+});
+
+client.on('qr', async (qr) => {
+    waStatus = 'Awaiting Scan';
+    // Convert the raw QR text into an image URL for the web page
+    currentQR = await qrcode.toDataURL(qr); 
+    console.log('New QR generated.');
+});
+
+client.on('ready', () => {
+    waStatus = 'Connected & Ready to Send!';
+    currentQR = ''; // Clear the QR code once connected
+    console.log('✅ WhatsApp Web is connected.');
+});
+
+client.initialize();
+
+// ==========================================
+// 2. THE WEB DASHBOARD (Frontend)
+// ==========================================
+app.get('/', (req, res) => {
+    // This serves a simple HTML page to your browser
+    res.send(`
+        <html>
+            <body style="font-family: Arial; padding: 50px; text-align: center;">
+                <h2>WhatsApp Outreach Dashboard</h2>
+                <p>Status: <strong>${waStatus}</strong></p>
+                
+                ${currentQR ? `<img src="${currentQR}" style="width: 250px; height: 250px; border: 1px solid black;"/><br><p>Refresh page to update QR</p>` : ''}
+                
+                <hr style="margin: 30px 0;">
+                
+                <h3>Upload Contacts (.xlsx)</h3>
+                <form action="/upload" method="POST" enctype="multipart/form-data">
+                    <input type="file" name="excelFile" accept=".xlsx" required />
+                    <button type="submit" style="padding: 10px 20px; background: blue; color: white; cursor: pointer;">Start Automation</button>
+                </form>
+            </body>
+        </html>
+    `);
+});
+
+// ==========================================
+// 3. THE UPLOAD ROUTE & DATA PIPELINE
+// ==========================================
+app.post('/upload', upload.single('excelFile'), async (req, res) => {
+    if (waStatus !== 'Connected & Ready to Send!') {
+        return res.status(400).send("WhatsApp is not connected yet! Go back and scan the QR.");
+    }
+
+    // Read the Excel file directly from the uploaded buffer (memory)
+    const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
     const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
 
-    const outreachList = [];
+    // Send a success message back to your browser immediately
+    res.send("<h2>File uploaded! The automation has started in the background.</h2><p>You can close this window.</p>");
 
-    data.forEach(row => {
+    // --- Start the Outreach Loop ---
+    console.log(`Starting outreach for ${data.length} potential rows...`);
+    const link = "https://your-portfolio-link.com";
+
+    for (let i = 0; i < data.length; i++) {
+        const row = data[i];
         const name = row['Names'];
         const rawNumbers = row['Phone Numbers'];
 
         if (name && rawNumbers) {
-            // Split by comma in case of multiple numbers
             const numberArray = String(rawNumbers).split(',');
 
-            numberArray.forEach(rawNum => {
-                let cleanRawNum = rawNum.trim();
-
+            for (let rawNum of numberArray) {
                 try {
-                    // 'SG' is the fallback if they didn't provide a country code (+)
-                    const number = phoneUtil.parseAndKeepRawInput(cleanRawNum, 'SG');
+                    let cleanRawNum = rawNum.trim();
+                    const numberObj = phoneUtil.parseAndKeepRawInput(cleanRawNum, 'SG');
 
-                    if (phoneUtil.isValidNumber(number)) {
-                        const e164Format = phoneUtil.format(number, PNF.E164);
-                        const whatsappFormatted = e164Format.replace('+', ''); // WhatsApp removes the +
+                    if (phoneUtil.isValidNumber(numberObj)) {
+                        const e164Format = phoneUtil.format(numberObj, PNF.E164);
+                        const whatsappId = `${e164Format.replace('+', '')}@c.us`;
 
-                        outreachList.push({
-                            name: name,
-                            whatsappId: `${whatsappFormatted}@c.us`
-                        });
-                    } else {
-                        console.log(`⚠️ Invalid number skipped for ${name}: ${cleanRawNum}`);
+                        // Ensure number has a WhatsApp account
+                        const isRegistered = await client.isRegisteredUser(whatsappId);
+                        if (isRegistered) {
+                            const message = `Hi ${name}! This is an automated test from the new Node.js server. Link: ${link}`;
+                            await client.sendMessage(whatsappId, message);
+                            console.log(`✅ Sent to ${name}`);
+
+                            // Safety delay (4-8 seconds)
+                            const delayMs = Math.floor(Math.random() * 4000) + 4000;
+                            await new Promise(r => setTimeout(r, delayMs));
+                            break; // Stop checking other numbers for this person once one succeeds
+                        }
                     }
                 } catch (error) {
-                    console.log(`❌ Parse failure for ${name}: ${cleanRawNum}`);
+                    // Ignore parse errors and try the next number
                 }
-            });
-        }
-    });
-
-    return outreachList;
-}
-
-// ==========================================
-// 2. COMMUNICATION LAYER: WhatsApp Bot
-// ==========================================
-// LocalAuth saves your session so you only scan the QR code once
-const client = new Client({
-    authStrategy: new LocalAuth(), 
-    puppeteer: { headless: true } // Runs the browser invisibly in the background
-});
-
-// Generate the QR code in the terminal
-client.on('qr', (qr) => {
-    console.log('\n--- SCAN THIS QR CODE WITH WHATSAPP ---');
-    qrcode.generate(qr, { small: true });
-});
-
-// When successfully authenticated and ready
-client.on('ready', async () => {
-    console.log('✅ WhatsApp connection established!');
-    console.log('📂 Reading contacts.xlsx...\n');
-
-    const contacts = processExcel('./contacts.xlsx');
-    const link = "https://your-portfolio-link.com";
-
-    console.log(`🚀 Starting outreach to ${contacts.length} valid numbers...\n`);
-
-    // Loop through the cleaned list
-    for (let i = 0; i < contacts.length; i++) {
-        const contact = contacts[i];
-        
-        try {
-            // The personalized message
-            const message = `Hi ${contact.name}! I am currently testing a custom Node.js automation pipeline. Here is the test link: ${link}`;
-            
-            // Send it
-            await client.sendMessage(contact.whatsappId, message);
-            console.log(`✅ [${i + 1}/${contacts.length}] Message sent to: ${contact.name}`);
-            
-            // THE DELAY: Only delay if it's NOT the last person in the list
-            if (i < contacts.length - 1) {
-                // Random delay between 4 to 8 seconds to mimic human typing
-                const delayMs = Math.floor(Math.random() * (8000 - 4000 + 1) + 4000);
-                console.log(`⏳ Pausing for ${delayMs / 1000} seconds to prevent spam flags...`);
-                await new Promise(resolve => setTimeout(resolve, delayMs));
             }
-
-        } catch (error) {
-            console.error(`❌ Failed to send to ${contact.name}:`, error.message);
         }
-    } // <-- End of your for loop
-
-    // ==========================================
-    // THE FIX: Graceful Shutdown
-    // ==========================================
-    console.log('\n🎉 Outreach loop finished!');
-    console.log('⏳ Waiting 5 seconds to ensure the final message leaves the outbox...');
-    
-    // Give the final network request time to actually travel to WhatsApp's servers
-    await new Promise(resolve => setTimeout(resolve, 5000)); 
-
-    console.log('🔌 Shutting down connection safely.');
-    
-    // Properly close the headless browser instead of violently killing the Node process
-    await client.destroy(); 
-    process.exit(0); 
+    }
+    console.log('🎉 Automation loop finished!');
 });
 
-// Boot up the engine
-client.initialize();
+// Start the Express server
+app.listen(port, () => {
+    console.log(`🌐 Web Dashboard running on port ${port}`);
+});
