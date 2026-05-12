@@ -104,9 +104,9 @@ app.get('/', (req, res) => {
                     
                     <label style="font-weight: bold; display: block; margin-top: 15px;">3. Message Template</label>
                     <p style="font-size: 12px; color: gray; margin: 2px 0 5px 0;">Use ~ColumnName~ for variables and &lt;ColumnName&gt; for links.</p>
-                    <textarea name="messageTemplate" rows="6" required style="width: 100%; padding: 10px; box-sizing: border-box;">Hi ~Names~, is this you? Are you coming to ~Place~? <Link></textarea>
+                    <textarea name="messageTemplate" rows="6" required style="width: 100%; padding: 10px; box-sizing: border-box;">Hi ~Names~, here is your ~Job~. <Link></textarea>
                     
-                    <button type="submit" style="margin-top: 20px; width: 100%; padding: 15px; background: blue; color: white; border: none; font-size: 16px; cursor: pointer;">Start Campaign</button>
+                    <button type="submit" style="margin-top: 20px; width: 100%; padding: 15px; background: blue; color: white; border: none; font-size: 16px; cursor: pointer;">Start</button>
                 </form>
             </body>
         </html>
