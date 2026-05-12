@@ -147,9 +147,14 @@ app.post('/upload', upload.fields([
         console.log(`Starting outreach for ${data.length} rows...`);
 
         // --- Start the Outreach Loop ---
+        // --- Start the Outreach Loop ---
         for (let i = 0; i < data.length; i++) {
             const row = data[i];
-            const rawNumbers = row['Phone Numbers']; // Make sure your Excel column is exactly 'Phone Numbers'
+            
+            // 🚨 X-RAY LOG 1: Print the raw Excel row so we can see the exact headers it found
+            console.log(`\n🔍 Scanning Row ${i + 1}:`, row);
+
+            const rawNumbers = row['Phone Numbers']; 
 
             if (rawNumbers) {
                 const numberArray = String(rawNumbers).split(',');
@@ -157,40 +162,48 @@ app.post('/upload', upload.fields([
                 for (let rawNum of numberArray) {
                     try {
                         let cleanRawNum = rawNum.trim();
+                        // 🚨 X-RAY LOG 2: Show the number it is trying to parse
+                        console.log(`☎️ Trying to format number: ${cleanRawNum}`);
+                        
                         const numberObj = phoneUtil.parseAndKeepRawInput(cleanRawNum, 'SG');
 
                         if (phoneUtil.isValidNumber(numberObj)) {
                             const e164Format = phoneUtil.format(numberObj, PNF.E164);
                             const whatsappId = `${e164Format.replace('+', '')}@c.us`;
 
+                            // 🚨 X-RAY LOG 3: Show the final WhatsApp ID
+                            console.log(`✅ Formatted as WhatsApp ID: ${whatsappId}. Checking if registered...`);
+
                             const isRegistered = await client.isRegisteredUser(whatsappId);
                             if (isRegistered) {
-                                
-                                // 🟢 GENERATE DYNAMIC TEXT
                                 const personalizedText = formatMessage(templateText, row);
 
-                                // 🟢 SEND MESSAGE (WITH OR WITHOUT IMAGE)
                                 if (imageMedia) {
                                     await client.sendMessage(whatsappId, imageMedia, { caption: personalizedText });
                                 } else {
                                     await client.sendMessage(whatsappId, personalizedText);
                                 }
                                 
-                                console.log(`✅ Sent to ${whatsappId}`);
+                                console.log(`🚀 SUCCESSFULLY SENT to ${whatsappId}`);
 
-                                // Safety delay (4-8 seconds)
                                 const delayMs = Math.floor(Math.random() * 4000) + 4000;
                                 await new Promise(r => setTimeout(r, delayMs));
                                 break; 
+                            } else {
+                                console.log(`❌ WhatsApp says ${whatsappId} is NOT a registered account.`);
                             }
+                        } else {
+                            console.log(`❌ Invalid phone number format: ${cleanRawNum}`);
                         }
                     } catch (error) {
-                        // Ignore parse errors and try the next number
+                        console.log(`⚠️ Google LibPhoneNumber couldn't parse: ${rawNum} - Error: ${error.message}`);
                     }
                 }
+            } else {
+                console.log(`⚠️ Skipped row ${i+1}: Could not find the 'Phone Numbers' column.`);
             }
         }
-        console.log('🎉 Automation loop finished!');
+        console.log('\n🎉 Automation loop finished!');
     } catch (error) {
         console.error("Critical Error during campaign:", error);
     }
