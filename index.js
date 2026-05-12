@@ -1,3 +1,4 @@
+const fs = require('fs');
 const express = require('express');
 const multer = require('multer');
 const qrcode = require('qrcode');
@@ -17,6 +18,12 @@ const upload = multer({ storage: multer.memoryStorage() });
 let currentQR = '';
 let waStatus = 'Initializing...';
 
+
+// 🧹 NUKE GHOST SESSIONS: Force delete the hidden auth folder on every boot
+if (fs.existsSync('./.wwebjs_auth')) {
+    fs.rmSync('./.wwebjs_auth', { recursive: true, force: true });
+    console.log('🧹 Swept away old corrupted ghost sessions.');
+}
 // ==========================================
 // 1. WHATSAPP ENGINE SETUP
 // ==========================================
@@ -29,14 +36,14 @@ const client = new Client({
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-gpu',           
-            '--no-first-run'           
+            '--no-first-run',
+            '--disable-blink-features=AutomationControlled' // 🛡️ NEW: Specifically hides the "Puppeteer/Bot" flag from Meta
         ] 
     },
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    webVersionCache: {
-        type: 'remote',
-        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
-    }
+    // 🛡️ UPDATED: Fresher Chrome version disguise
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    
+    // Notice I REMOVED the webVersionCache. We are going to let WhatsApp pull the absolute newest version to stop the block.
 });
 
 client.on('qr', async (qr) => {
