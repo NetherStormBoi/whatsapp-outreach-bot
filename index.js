@@ -19,9 +19,22 @@ let waStatus = 'Initializing...';
 let isProcessingCampaign = false;
 
 // ==========================================
+// 🛡️ ANTI-ML: GAUSSIAN RANDOM GENERATOR
+// ==========================================
+// Generates a "bell curve" distribution instead of a flat robotic uniform distribution
+function getOrganicDelay(min, max) {
+    let u = 0, v = 0;
+    while(u === 0) u = Math.random(); 
+    while(v === 0) v = Math.random();
+    let num = Math.sqrt( -2.0 * Math.log( u ) ) * Math.cos( 2.0 * Math.PI * v );
+    num = num / 10.0 + 0.5; // Translate to 0 -> 1
+    if (num > 1 || num < 0) return getOrganicDelay(min, max); // Resample if outlier
+    return Math.floor(num * (max - min) + min);
+}
+
+// ==========================================
 // 🧹 PRE-FLIGHT: NUKE CORRUPT CACHES
 // ==========================================
-// Deletes the ghost session folder on every server restart to prevent "Context Destroyed" loops
 if (fs.existsSync('./.wwebjs_auth')) {
     try {
         fs.rmSync('./.wwebjs_auth', { recursive: true, force: true });
@@ -126,7 +139,7 @@ app.get('/', (req, res) => {
                     
                     <hr style="border: 0; border-top: 1px solid #eee; margin: 30px 0;">
                     
-                    <h3>Campaign Setup</h3>
+                    <h3>Setup</h3>
                     <form action="/upload" method="POST" enctype="multipart/form-data" style="text-align: left;">
                         <label>1. Upload Contacts (.xlsx)</label>
                         <input type="file" name="excelFile" accept=".xlsx" required style="padding: 8px;" />
@@ -136,7 +149,7 @@ app.get('/', (req, res) => {
                         
                         <label>3. Message Template</label>
                         <p style="font-size: 12px; color: gray; margin: -5px 0 10px 0;">Variables: ~ColumnName~ | Links: &lt;ColumnName&gt;</p>
-                        <textarea name="messageTemplate" rows="5" required style="padding: 10px;">Hi ~Names~, is this you? Are you coming to ~Place~? <Link></textarea>
+                        <textarea name="messageTemplate" rows="5" required style="padding: 10px;">Hi ~Names~, this is a test! Please report to ~Place~. <Link></textarea>
                         
                         <button type="submit" ${waStatus !== 'Connected & Ready to Send!' || isProcessingCampaign ? 'disabled' : ''}>
                             ${isProcessingCampaign ? 'Campaign Running in Background...' : 'Launch Automation Pipeline'}
@@ -149,7 +162,7 @@ app.get('/', (req, res) => {
 });
 
 // ==========================================
-// 4. THE OUTREACH PIPELINE (Anti-Ban Logic)
+// 4. THE OUTREACH PIPELINE (Anti-ML Logic)
 // ==========================================
 app.post('/upload', upload.fields([
     { name: 'excelFile', maxCount: 1 }, 
@@ -173,7 +186,7 @@ app.post('/upload', upload.fields([
         const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
 
         isProcessingCampaign = true;
-        res.send("<h2>Campaign initialized!</h2><p>Messages are slowly sending in the background to avoid spam filters. You can close this window and monitor the Railway logs.</p>");
+        res.send("<h2>Pipeline initialized!</h2><p>Messages are slowly sending in the background to avoid spam filters. You can close this window and monitor the Railway logs.</p>");
         console.log(`📊 Loaded ${rows.length} rows for outreach.`);
 
         // --- Core Execution Loop ---
@@ -211,37 +224,49 @@ app.post('/upload', upload.fields([
                     const personalizedText = formatMessage(templateText, row);
 
                     // ========================================================
-                    // 🛡️ STEALTH SEQUENCE: Human Typing Simulation
+                    // 🛡️ STEALTH SEQUENCE 1: Organic Typing Simulation
                     // ========================================================
                     console.log(`[Row ${i + 1}] Engaging stealth mode for ${whatsappId}...`);
                     const chat = await client.getChatById(whatsappId);
                     
-                    // 1. Show "Typing..." to the recipient
                     await chat.sendStateTyping();
                     
-                    // 2. Simulate human typing speed (Wait 3-6 seconds)
-                    const typingDelay = Math.floor(Math.random() * 3000) + 3000;
-                    await new Promise(r => setTimeout(r, typingDelay));
+                    // Human typing varies wildly. Bell curve between 2 and 7 seconds.
+                    const organicTypingDelay = getOrganicDelay(2000, 7000);
+                    await new Promise(r => setTimeout(r, organicTypingDelay));
                     
-                    // 3. Dispatch payload
                     if (imageMedia) {
                         await client.sendMessage(whatsappId, imageMedia, { caption: personalizedText });
                     } else {
                         await client.sendMessage(whatsappId, personalizedText);
                     }
                     
-                    // 4. Clear typing status
                     await chat.clearState();
-
                     console.log(`🚀 SUCCESSFULLY SENT -> ${whatsappId}`);
 
                     // ========================================================
-                    // 🛡️ MASSIVE HUMAN COOLDOWN (Anti-Logout Guard)
+                    // 🛡️ STEALTH SEQUENCE 2: The "Coffee Break" Algorithm
                     // ========================================================
-                    // Forces a 15 to 30 second delay between every single message
-                    const variableCooldown = Math.floor(Math.random() * 15000) + 15000;
-                    console.log(`⏳ Cooldown active. Waiting ${Math.round(variableCooldown/1000)}s before next candidate...`);
-                    await new Promise(r => setTimeout(r, variableCooldown));
+                    // Every 15 to 25 messages, the bot simulates getting up from the desk.
+                    if (i > 0 && i % (Math.floor(Math.random() * 10) + 15) === 0) {
+                        const breakMinutes = Math.floor(Math.random() * 8) + 4; // 4 to 11 minute break
+                        const breakMs = breakMinutes * 60 * 1000;
+                        console.log(`☕ ANTI-ML TRIGGERED: Simulating a human break for ${breakMinutes} minutes...`);
+                        await new Promise(r => setTimeout(r, breakMs));
+                    }
+
+                    // ========================================================
+                    // 🛡️ STEALTH SEQUENCE 3: Gaussian Cooldown + Micro-Jitter
+                    // ========================================================
+                    // Standard delay between candidates. Bell curve between 12 and 38 seconds.
+                    const organicCooldown = getOrganicDelay(12000, 38000);
+                    
+                    // Add a tiny "micro-jitter" (1-500ms) to bypass signature matching
+                    const microJitter = Math.floor(Math.random() * 500);
+                    const finalWaitTime = organicCooldown + microJitter;
+
+                    console.log(`⏳ Organic cooldown. Waiting ${(finalWaitTime/1000).toFixed(1)}s before next candidate...`);
+                    await new Promise(r => setTimeout(r, finalWaitTime));
                     
                     break; 
 
