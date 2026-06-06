@@ -1,31 +1,34 @@
-const fs = require('fs');
 const express = require('express');
 const multer = require('multer');
 const qrcode = require('qrcode');
 const xlsx = require('xlsx');
+const fs = require('fs');
 const phoneUtil = require('google-libphonenumber').PhoneNumberUtil.getInstance();
 const PNF = require('google-libphonenumber').PhoneNumberFormat;
-// 🟢 IMPORT MESSAGEMEDIA FOR IMAGES
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Configure Multer to hold the uploaded Excel file and Image in memory
+// Configure Multer 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Global variables to hold the WhatsApp state
 let currentQR = '';
 let waStatus = 'Initializing...';
+let isProcessingCampaign = false; // Flag to prevent concurrent overlapping loops
 
-
-// 🧹 NUKE GHOST SESSIONS: Force delete the hidden auth folder on every boot
+// 🧹 Force clear stale cache on boot to ensure fresh frame contexts
 if (fs.existsSync('./.wwebjs_auth')) {
-    fs.rmSync('./.wwebjs_auth', { recursive: true, force: true });
-    console.log('🧹 Swept away old corrupted ghost sessions.');
+    try {
+        fs.rmSync('./.wwebjs_auth', { recursive: true, force: true });
+        console.log('🧹 Clean state initialized.');
+    } catch (e) {
+        console.log('⚠️ Session folder busy, proceeding...');
+    }
 }
+
 // ==========================================
-// 1. WHATSAPP ENGINE SETUP
+// 1. WHATSAPP CLIENT CONFIGURATION
 // ==========================================
 const client = new Client({
     authStrategy: new LocalAuth(),
@@ -37,179 +40,197 @@ const client = new Client({
             '--disable-dev-shm-usage',
             '--disable-gpu',           
             '--no-first-run',
-            '--disable-blink-features=AutomationControlled' // 🛡️ NEW: Specifically hides the "Puppeteer/Bot" flag from Meta
+            '--disable-blink-features=AutomationControlled'
         ] 
     },
-    // 🛡️ UPDATED: Fresher Chrome version disguise
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-    
-    // Notice I REMOVED the webVersionCache. We are going to let WhatsApp pull the absolute newest version to stop the block.
+    // Modern user agent flag to bypass security refreshes
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 });
 
 client.on('qr', async (qr) => {
     waStatus = 'Awaiting Scan';
-    currentQR = await qrcode.toDataURL(qr); 
-    console.log('New QR generated.');
+    try {
+        currentQR = await qrcode.toDataURL(qr); 
+    } catch (err) {
+        console.error('Failed generating QR code frame.');
+    }
 });
 
 client.on('ready', () => {
     waStatus = 'Connected & Ready to Send!';
     currentQR = ''; 
-    console.log('✅ WhatsApp Web is connected.');
+    console.log('✅ System successfully authenticated and ready.');
 });
 
-client.initialize();
+client.on('disconnected', (reason) => {
+    waStatus = 'Disconnected';
+    isProcessingCampaign = false;
+    console.log(`❌ WhatsApp session was destroyed: ${reason}`);
+});
+
+client.initialize().catch(err => console.error("Initialization failure:", err));
 
 // ==========================================
-// 🟢 NEW FUNCTION: DYNAMIC VARIABLE INJECTION
+// 2. TEMPLATE PARSING UTILITY
 // ==========================================
 function formatMessage(template, rowData) {
     let finalMessage = template;
-
-    // Replace ~Variable~ tags
     finalMessage = finalMessage.replace(/~([^~]+)~/g, (match, columnName) => {
-        return rowData[columnName] !== undefined ? rowData[columnName] : match;
+        const trimmed = columnName.trim();
+        return rowData[trimmed] !== undefined ? rowData[trimmed] : match;
     });
-
-    // Replace <Variable> tags
     finalMessage = finalMessage.replace(/<([^>]+)>/g, (match, columnName) => {
-        return rowData[columnName] !== undefined ? rowData[columnName] : match;
+        const trimmed = columnName.trim();
+        return rowData[trimmed] !== undefined ? rowData[trimmed] : match;
     });
-
     return finalMessage;
 }
 
 // ==========================================
-// 2. THE WEB DASHBOARD (Frontend)
+// 3. UI DASHBOARD ROUTE
 // ==========================================
 app.get('/', (req, res) => {
     res.send(`
         <html>
-            <body style="font-family: Arial; padding: 50px; text-align: center;">
-                <h2>WhatsApp Outreach Dashboard</h2>
-                <p>Status: <strong>${waStatus}</strong></p>
-                
-                ${currentQR ? `<img src="${currentQR}" style="width: 250px; height: 250px; border: 1px solid black;"/><br><p>Refresh page to update QR</p>` : ''}
-                
-                <hr style="margin: 30px 0;">
-                
-                <h3>Campaign Setup</h3>
-                <form action="/upload" method="POST" enctype="multipart/form-data" style="max-width: 500px; margin: auto; text-align: left;">
+            <body style="font-family: Arial, sans-serif; padding: 40px; text-align: center; background: #f4f6f9;">
+                <div style="max-width: 600px; margin: auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    <h2>Outreach Engine Portal</h2>
+                    <p>System State: <span style="padding: 5px 10px; background: #e0e0e0; border-radius: 4px; font-weight: bold;">${waStatus}</span></p>
                     
-                    <label style="font-weight: bold; display: block; margin-top: 15px;">1. Upload Contacts (.xlsx)</label>
-                    <input type="file" name="excelFile" accept=".xlsx" required style="width: 100%; padding: 5px;" />
+                    ${currentQR ? `<img src="${currentQR}" style="width: 250px; height: 250px; border: 1px solid #ccc; margin: 20px 0;"/><br><p style="color:#666;">Scan QR to bridge your session.</p>` : ''}
                     
-                    <label style="font-weight: bold; display: block; margin-top: 15px;">2. Attach Image (Optional)</label>
-                    <input type="file" name="imageFile" accept="image/png, image/jpeg" style="width: 100%; padding: 5px;" />
+                    <hr style="border: 0; border-top: 1px solid #eee; margin: 30px 0;">
                     
-                    <label style="font-weight: bold; display: block; margin-top: 15px;">3. Message Template</label>
-                    <p style="font-size: 12px; color: gray; margin: 2px 0 5px 0;">Use ~ColumnName~ for variables and &lt;ColumnName&gt; for links.</p>
-                    <textarea name="messageTemplate" rows="6" required style="width: 100%; padding: 10px; box-sizing: border-box;">Hi ~Names~, here is your ~Job~. <Link></textarea>
-                    
-                    <button type="submit" style="margin-top: 20px; width: 100%; padding: 15px; background: blue; color: white; border: none; font-size: 16px; cursor: pointer;">Start</button>
-                </form>
+                    <h3>Campaign Setup</h3>
+                    <form action="/upload" method="POST" enctype="multipart/form-data" style="text-align: left;">
+                        <label style="font-weight: bold; display: block; margin-top: 15px;">1. Upload Contacts Spreadsheet (.xlsx)</label>
+                        <input type="file" name="excelFile" accept=".xlsx" required style="width: 100%; padding: 8px; margin-top: 5px;" />
+                        
+                        <label style="font-weight: bold; display: block; margin-top: 15px;">2. Attach Outreach Image (Optional)</label>
+                        <input type="file" name="imageFile" accept="image/png, image/jpeg" style="width: 100%; padding: 8px; margin-top: 5px;" />
+                        
+                        <label style="font-weight: bold; display: block; margin-top: 15px;">3. Message Copy Layout</label>
+                        <textarea name="messageTemplate" rows="5" required style="width: 100%; padding: 10px; margin-top: 5px; border-radius: 4px; border: 1px solid #ccc; font-family: inherit;">Hi ~Names~, is this you? Are you coming to ~Place~? <Link></textarea>
+                        
+                        <button type="submit" ${waStatus !== 'Connected & Ready to Send!' || isProcessingCampaign ? 'disabled' : ''} style="margin-top: 20px; width: 100%; padding: 12px; background: ${waStatus !== 'Connected & Ready to Send!' ? '#ccc' : '#25D366'}; color: white; border: none; font-size: 16px; font-weight:bold; border-radius: 4px; cursor: pointer;">
+                            ${isProcessingCampaign ? 'Campaign Running...' : 'Launch Automation Pipeline'}
+                        </button>
+                    </form>
+                </div>
             </body>
         </html>
     `);
 });
 
 // ==========================================
-// 3. THE UPLOAD ROUTE & DATA PIPELINE
+// 4. THE CAMPAIGN PIPELINE
 // ==========================================
-// 🟢 UPDATED TO HANDLE BOTH EXCEL AND IMAGE UPLOADS
 app.post('/upload', upload.fields([
     { name: 'excelFile', maxCount: 1 }, 
     { name: 'imageFile', maxCount: 1 }
 ]), async (req, res) => {
     if (waStatus !== 'Connected & Ready to Send!') {
-        return res.status(400).send("WhatsApp is not connected yet! Go back and scan the QR.");
+        return res.status(400).send("Pipeline error: System session is offline.");
+    }
+    if (isProcessingCampaign) {
+        return res.status(400).send("Pipeline error: A campaign run is already active.");
     }
 
     try {
-        // 🟢 Extract Frontend Data
         const templateText = req.body.messageTemplate;
         const excelBuffer = req.files['excelFile'][0].buffer;
         
-        // 🟢 Process Image (if uploaded)
         let imageMedia = null;
         if (req.files['imageFile']) {
             const img = req.files['imageFile'][0];
             imageMedia = new MessageMedia(img.mimetype, img.buffer.toString('base64'), img.originalname);
         }
 
-        // Read Excel File
         const workbook = xlsx.read(excelBuffer, { type: 'buffer' });
         const sheetName = workbook.SheetNames[0];
-        const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+        const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
 
-        res.send("<h2>Campaign launched! Sending in the background.</h2><p>You can close this window.</p>");
+        isProcessingCampaign = true;
+        res.send("<h2>Campaign initialized. Progress streaming on cloud infrastructure engine logs.</h2>");
+        console.log(`📊 Loaded ${rows.length} rows for validation schema pipeline.`);
 
-        console.log(`Starting outreach for ${data.length} rows...`);
+        // --- Core Execution Loop ---
+        for (let i = 0; i < rows.length; i++) {
+            // Hard connection status check inside the loop to kill ghost executions instantly
+            if (waStatus !== 'Connected & Ready to Send!') {
+                console.error("🚨 Critical Error: Puppeteer disconnected during loop execution. Aborting pipeline process immediately.");
+                break;
+            }
 
-        // --- Start the Outreach Loop ---
-        // --- Start the Outreach Loop ---
-        for (let i = 0; i < data.length; i++) {
-            const row = data[i];
-            
-            // 🚨 X-RAY LOG 1: Print the raw Excel row so we can see the exact headers it found
-            console.log(`\n🔍 Scanning Row ${i + 1}:`, row);
-
+            const row = rows[i];
             const rawNumbers = row['Phone Numbers']; 
 
-            if (rawNumbers) {
-                const numberArray = String(rawNumbers).split(',');
+            if (!rawNumbers) {
+                console.log(`[Row ${i + 1}] Missing target 'Phone Numbers' field.`);
+                continue;
+            }
 
-                for (let rawNum of numberArray) {
-                    try {
-                        let cleanRawNum = rawNum.trim();
-                        // 🚨 X-RAY LOG 2: Show the number it is trying to parse
-                        console.log(`☎️ Trying to format number: ${cleanRawNum}`);
-                        
-                        const numberObj = phoneUtil.parseAndKeepRawInput(cleanRawNum, 'SG');
+            const numberArray = String(rawNumbers).split(',');
 
-                        if (phoneUtil.isValidNumber(numberObj)) {
-                            const e164Format = phoneUtil.format(numberObj, PNF.E164);
-                            const whatsappId = `${e164Format.replace('+', '')}@c.us`;
+            for (let rawNum of numberArray) {
+                let cleanRawNum = rawNum.trim();
+                if (!cleanRawNum) continue;
 
-                            // 🚨 X-RAY LOG 3: Show the final WhatsApp ID
-                            console.log(`✅ Formatted as WhatsApp ID: ${whatsappId}. Checking if registered...`);
+                try {
+                    const numberObj = phoneUtil.parseAndKeepRawInput(cleanRawNum, 'SG');
 
-                            const isRegistered = await client.isRegisteredUser(whatsappId);
-                            if (isRegistered) {
-                                const personalizedText = formatMessage(templateText, row);
+                    if (!phoneUtil.isValidNumber(numberObj)) {
+                        console.log(`[Row ${i + 1}] Flagged invalid phone configuration structural syntax: ${cleanRawNum}`);
+                        continue;
+                    }
 
-                                if (imageMedia) {
-                                    await client.sendMessage(whatsappId, imageMedia, { caption: personalizedText });
-                                } else {
-                                    await client.sendMessage(whatsappId, personalizedText);
-                                }
-                                
-                                console.log(`🚀 SUCCESSFULLY SENT to ${whatsappId}`);
+                    const e164Format = phoneUtil.format(numberObj, PNF.E164);
+                    const whatsappId = `${e164Format.replace('+', '')}@c.us`;
 
-                                const delayMs = Math.floor(Math.random() * 4000) + 4000;
-                                await new Promise(r => setTimeout(r, delayMs));
-                                break; 
-                            } else {
-                                console.log(`❌ WhatsApp says ${whatsappId} is NOT a registered account.`);
-                            }
-                        } else {
-                            console.log(`❌ Invalid phone number format: ${cleanRawNum}`);
-                        }
-                    } catch (error) {
-                        console.log(`⚠️ Google LibPhoneNumber couldn't parse: ${rawNum} - Error: ${error.message}`);
+                    // Safely execute registration handshake validation check
+                    const isRegistered = await client.isRegisteredUser(whatsappId);
+                    if (!isRegistered) {
+                        console.log(`[Row ${i + 1}] System verification: No WhatsApp account registered for target endpoint.`);
+                        continue;
+                    }
+
+                    const personalizedText = formatMessage(templateText, row);
+
+                    // True async resolution evaluation: code prints success ONLY if the promise resolves completely
+                    if (imageMedia) {
+                        await client.sendMessage(whatsappId, imageMedia, { caption: personalizedText });
+                    } else {
+                        await client.sendMessage(whatsappId, personalizedText);
+                    }
+                    
+                    // Controlled logging rate output to satisfy Railway framework thresholds
+                    console.log(`🚀 Row ${i + 1}/${rows.length} -> Outbound dispatched to endpoint ID: ${whatsappId}`);
+
+                    // Throttled cooldown block (6-10 seconds) protects against browser reloads
+                    const variableCooldown = Math.floor(Math.random() * 4000) + 6000;
+                    await new Promise(r => setTimeout(r, variableCooldown));
+                    break; 
+
+                } catch (error) {
+                    console.error(`❌ Unexpected loop fault detected on Row ${i + 1}: ${error.message}`);
+                    if (error.message.includes('destroyed') || error.message.includes('detached')) {
+                        waStatus = 'Disconnected';
+                        break;
                     }
                 }
-            } else {
-                console.log(`⚠️ Skipped row ${i+1}: Could not find the 'Phone Numbers' column.`);
             }
+            if (waStatus !== 'Connected & Ready to Send!') break;
         }
-        console.log('\n🎉 Automation loop finished!');
-    } catch (error) {
-        console.error("Critical Error during campaign:", error);
+
+        isProcessingCampaign = false;
+        console.log('🎉 Automation loop sequence lifecycle has completed gracefully.');
+
+    } catch (globalError) {
+        isProcessingCampaign = false;
+        console.error("Fatal deployment failure encountered:", globalError);
     }
 });
 
-// Start the Express server
 app.listen(port, '0.0.0.0', () => {
-    console.log(`🌐 Web Dashboard running on port ${port}`);
+    console.log(`🌐 Operational dashboard service listening on port ${port}`);
 });
