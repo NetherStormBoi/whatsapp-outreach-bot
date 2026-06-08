@@ -33,10 +33,15 @@ function getOrganicDelay(min, max) {
 // ==========================================
 // 🛡️ STEALTH ENGINE: DYNAMIC FINGERPRINTING
 // ==========================================
-// Generate a completely random, valid desktop browser fingerprint for this specific session
-const sessionUserAgent = randomUseragent.getRandom(function (ua) {
-    return ua.deviceType === undefined && ua.osName === 'Windows' && parseFloat(ua.browserVersion) >= 110;
+// Attempt to generate a completely random, valid desktop browser fingerprint
+let sessionUserAgent = randomUseragent.getRandom(function (ua) {
+    return ua.osName === 'Windows' && parseFloat(ua.browserVersion) >= 90; // Lowered to 90 to ensure matches
 });
+
+// 🚨 FALLBACK PROTECTOR: If the library's dictionary fails and returns null, use a guaranteed modern string
+if (!sessionUserAgent) {
+    sessionUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+}
 
 // ==========================================
 // 🧹 PRE-FLIGHT CACHE WIPE
